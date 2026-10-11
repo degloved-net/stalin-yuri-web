@@ -1,0 +1,291 @@
+diff --git a/.godot/.gdignore b/.godot/.gdignore
+new file mode 100644
+index 0000000..8b13789
+--- /dev/null
++++ b/.godot/.gdignore
+@@ -0,0 +1 @@
++
+diff --git a/.godot/extension_list.cfg b/.godot/extension_list.cfg
+deleted file mode 100644
+index 1845d0d..0000000
+--- a/.godot/extension_list.cfg
++++ /dev/null
+@@ -1 +0,0 @@
+-res://addons/godotsteam/godotsteam.gdextension
+diff --git a/GodotSteam.gd b/GodotSteam.gd
+index dd0fc85..9a31881 100644
+--- a/GodotSteam.gd
++++ b/GodotSteam.gd
+@@ -1,29 +1,15 @@
+ extends Node
+ 
+-var STEAM_APP_ID = 3137130
+-const supportedLangsDict = {
+-	"english": "en", 
+-	"russian": "ru", 
+-	"portuguese": "pt", 
+-	"turkish": "tr", 
+-	"spanish": "es", 
+-	"brazilian": "pt", 
+-	"latam": "es"
+-}
++var achievements := ConfigFile.new()
+ 
+ func _ready():
+-	_initialize_steam()
+-
+-func _initialize_steam():
+-	OS.set_environment("SteamAppId", str(STEAM_APP_ID))
+-	OS.set_environment("SteamGameId", str(STEAM_APP_ID))
+-	var initialize_response: Dictionary = Steam.steamInit()
+-
+-	var lang = Steam.getSteamUILanguage()
+-	if (lang && supportedLangsDict.has(lang)):
+-		TranslationServer.set_locale(supportedLangsDict[lang])
+-	else:
+-		TranslationServer.set_locale("us")
+-
+-func _process(_delta: float):
+-	Steam.run_callbacks()
++	achievements.load("user://achievements.cfg")
++	var language := OS.get_locale_language()
++	if language not in ["en", "ru", "pt", "tr", "es"]:
++		language = "en"
++	TranslationServer.set_locale(language)
++
++func unlock_achievement(name: String):
++	achievements.set_value("achievements", name, true)
++	if achievements.save("user://achievements.cfg") != OK:
++		push_warning("could not save achievement")
+diff --git a/addons/dialogic/Core/DialogicUtil.gd b/addons/dialogic/Core/DialogicUtil.gd
+index c931598..d517f70 100644
+--- a/addons/dialogic/Core/DialogicUtil.gd
++++ b/addons/dialogic/Core/DialogicUtil.gd
+@@ -9,7 +9,10 @@ class_name DialogicUtil
+ 
+ 
+ static func get_editor_scale() -> float:
+-	return get_dialogic_plugin().get_editor_interface().get_editor_scale()
++	var plugin := get_dialogic_plugin()
++	if plugin == null:
++		return 1.0
++	return plugin.get_editor_interface().get_editor_scale()
+ 
+ 
+ 
+@@ -17,7 +20,7 @@ static func get_editor_scale() -> float:
+ static func get_dialogic_plugin() -> Node:
+ 	for child in Engine.get_main_loop().get_root().get_children():
+ 		if child.get_class() == "EditorNode":
+-			return child.get_node("DialogicPlugin")
++			return child.get_node_or_null("DialogicPlugin")
+ 	return null
+ 
+ 
+diff --git a/addons/dialogic/Modules/Text/node_name_label.gd b/addons/dialogic/Modules/Text/node_name_label.gd
+index 0485b7b..03a431a 100644
+--- a/addons/dialogic/Modules/Text/node_name_label.gd
++++ b/addons/dialogic/Modules/Text/node_name_label.gd
+@@ -22,3 +22,5 @@ func _set(property, what):
+ 		else:
+ 			name_label_root.show()
+ 		return true
++
++	return false
+diff --git a/addons/dialogic/Modules/Variable/subsystem_variables.gd b/addons/dialogic/Modules/Variable/subsystem_variables.gd
+index 60c9641..fb25cf6 100644
+--- a/addons/dialogic/Modules/Variable/subsystem_variables.gd
++++ b/addons/dialogic/Modules/Variable/subsystem_variables.gd
+@@ -183,6 +183,7 @@ func _get(property):
+ 			return VariableFolder.new(dialogic.current_state_info["variables"][property], property, self)
+ 		else:
+ 			return DialogicUtil.logical_convert(dialogic.current_state_info["variables"][property])
++	return null
+ 
+ 
+ func folders() -> Array:
+@@ -244,6 +245,7 @@ class VariableFolder:
+ 				return VariableFolder.new(data[property], path + "." + property, outside)
+ 			else:
+ 				return DialogicUtil.logical_convert(data[property])
++		return null
+ 
+ 
+ 	func _set(property: StringName, value: Variant) -> bool:
+@@ -274,3 +276,5 @@ class VariableFolder:
+ 				else:
+ 					result.append(i)
+ 		return result
++
++		return result
+diff --git a/addons/godotsteam/godotsteam.gdextension b/addons/godotsteam/godotsteam.gdextension.disabled
+similarity index 100%
+rename from addons/godotsteam/godotsteam.gdextension
+rename to addons/godotsteam/godotsteam.gdextension.disabled
+diff --git a/export_presets.cfg b/export_presets.cfg
+index 807d0ec..df5fb6d 100644
+--- a/export_presets.cfg
++++ b/export_presets.cfg
+@@ -5,7 +5,7 @@ runnable=true
+ custom_features=""
+ export_filter="all_resources"
+ include_filter="web.cfg,override.cfg"
+-exclude_filter=""
++exclude_filter="addons/godotsteam/*"
+ export_path=""
+ script_export_mode=0
+ 
+@@ -26,7 +26,7 @@ runnable=true
+ custom_features="threads"
+ export_filter="all_resources"
+ include_filter="web.cfg,override.cfg"
+-exclude_filter=""
++exclude_filter="addons/godotsteam/*"
+ export_path=""
+ script_export_mode=0
+ 
+diff --git a/game.gd b/game.gd
+index 4e9a61d..05e82c0 100644
+--- a/game.gd
++++ b/game.gd
+@@ -19,25 +19,27 @@ var ending_dict = {
+ func _ready():
+ 	pause_menu.visible = false
+ 	Dialogic.signal_event.connect(_on_dialogic_signal)
++	Dialogic.start.call_deferred("start")
+ 
+ func _on_dialogic_signal(argument: String):
+ 	if (argument == "true_ending"):
+ 
+-		Steam.setAchievement("TRUE_ENDING")
+-		Steam.storeStats()
++		GodotSteam.unlock_achievement("TRUE_ENDING")
+ 		get_tree().change_scene_to_packed(menu)
+ 	elif (argument.contains("ending")):
+ 		Signals.stop_main_music.emit()
+-		Steam.setAchievement(ending_dict[argument])
+-		Steam.storeStats()
++		GodotSteam.unlock_achievement(ending_dict[argument])
+ 		render_ending(argument)
+ 
+ func render_ending(ending: String):
+ 	if (scene):
+ 		var ending_scene = scene.instantiate()
+ 		ending_scene.set_ending(ending_dict[ending])
+-		get_tree().root.add_child(ending_scene)
+-		get_tree().current_scene = ending_scene
++		var tree := get_tree()
++		var previous_scene := tree.current_scene
++		tree.root.add_child(ending_scene)
++		tree.current_scene = ending_scene
++		previous_scene.queue_free()
+ 	else:
+ 		print("deu ruim")
+ 
+diff --git a/scenes/ending/ending.gd b/scenes/ending/ending.gd
+index 3c55c3e..7310f90 100644
+--- a/scenes/ending/ending.gd
++++ b/scenes/ending/ending.gd
+@@ -14,4 +14,7 @@ func _on_back_pressed():
+ 	get_tree().change_scene_to_file("res://scenes/menu/menu.tscn")
+ 
+ func _on_quit_pressed():
+-	get_tree().quit()
++	if OS.has_feature("web"):
++		_on_back_pressed()
++	else:
++		get_tree().quit()
+diff --git a/scenes/menu/menu.gd b/scenes/menu/menu.gd
+index ecbb95f..2ad93a4 100644
+--- a/scenes/menu/menu.gd
++++ b/scenes/menu/menu.gd
+@@ -4,10 +4,11 @@ extends Control
+ 
+ func _ready():
+ 	_animator.play("slide")
++	if OS.has_feature("web"):
++		$Panel/Quit.hide()
+ 
+ func _on_play_pressed():
+ 	get_tree().change_scene_to_file("res://game.tscn")
+-	Dialogic.start("start")
+ 
+ func _on_settings_pressed():
+ 	get_tree().change_scene_to_file("res://scenes/settings/settings.tscn")
+diff --git a/scenes/pause_menu/pause_menu.gd b/scenes/pause_menu/pause_menu.gd
+index 87aeb6f..7382aba 100644
+--- a/scenes/pause_menu/pause_menu.gd
++++ b/scenes/pause_menu/pause_menu.gd
+@@ -25,7 +25,10 @@ func _on_menu_pressed():
+ 	get_tree().change_scene_to_file("res://scenes/menu/menu.tscn")
+ 
+ func _on_quit_pressed():
+-	get_tree().quit()
++	if OS.has_feature("web"):
++		_on_menu_pressed()
++	else:
++		get_tree().quit()
+ 
+ func testEsc():
+ 	if Input.is_action_just_pressed("escape") and !get_tree().paused:
+diff --git a/scenes/settings/settings.gd b/scenes/settings/settings.gd
+index b65cef3..3817737 100644
+--- a/scenes/settings/settings.gd
++++ b/scenes/settings/settings.gd
+@@ -18,7 +18,7 @@ func _ready():
+ 		options_button.select(saved_index)
+ 		_on_option_button_item_selected(saved_index)
+ 	else:
+-		var curr_size: Vector2 = DisplayServer.screen_get_size()
++		var curr_size: Vector2 = get_viewport().content_scale_size
+ 		get_viewport().content_scale_size = curr_size
+ 		var size_string = str(curr_size.x) + "x" + str(curr_size.y)
+ 		options_button.add_item(size_string, 5)
+@@ -29,7 +29,7 @@ func _on_back_pressed():
+ 
+ func _on_check_fullscreen_pressed():
+ 	if DisplayServer.window_get_mode() == DisplayServer.WINDOW_MODE_FULLSCREEN:
+-		DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_MAXIMIZED)
++		DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_WINDOWED)
+ 	else:
+ 		DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_FULLSCREEN)
+ 
+@@ -40,7 +40,7 @@ func _on_sfx_slider_value_changed(value):
+ 	AudioServer.set_bus_volume_db(AudioServer.get_bus_index("sfx"), value)
+ 
+ func _on_us_pressed() -> void :
+-	TranslationServer.set_locale("us")
++	TranslationServer.set_locale("en")
+ 
+ func _on_tr_pressed() -> void :
+ 	TranslationServer.set_locale("tr")
+diff --git a/screen.gd b/screen.gd
+index c5b17be..4a83e2c 100644
+--- a/screen.gd
++++ b/screen.gd
+@@ -2,6 +2,8 @@ extends Node
+ 
+ func _ready():
+ 	var curr_size: Vector2 = DisplayServer.screen_get_size()
++	if OS.has_feature("web"):
++		curr_size = Vector2(1152, 648)
+ 	get_viewport().content_scale_size = curr_size
+ 
+ var selected_resolution_index: int = -1
+diff --git a/web.cfg b/web.cfg
+index d2a326c..7ab324e 100644
+--- a/web.cfg
++++ b/web.cfg
+@@ -1,4 +1,5 @@
+ [display]
++window/stretch/scale_mode="fractional"
+ window/size/mode=0
+ window/size/mode.web=0
+ 
+@@ -13,3 +14,6 @@ enabled=PackedStringArray()
+ 
+ [audio]
+ general/default_playback_type.web=0
++
++[dialogic]
++text/autoskip_enabled=false
