@@ -22,19 +22,22 @@ if ! command -v "$godot" >/dev/null 2>&1; then
 fi
 
 case "$("$godot" --version)" in
-    3.6.*)
-        export_args=(--export)
-        errors='^SCRIPT ERROR:'
-        ;;
-    4.[3-9].*|4.[1-9][0-9].*)
+    4.7.1.*)
         export_args=(--headless --rendering-method gl_compatibility --export-release)
         errors='^SCRIPT ERROR:|^ERROR:'
         ;;
     *)
-        echo 'use godot 3.6.x or 4.3+ with web export templates' >&2
+        echo 'use Godot 4.7.1 to match the bundled Web export templates' >&2
         exit 1
         ;;
 esac
+
+for template in web_nothreads_release.zip web_release.zip; do
+    if [[ ! -s "$project/.web-templates/$template" ]]; then
+        echo "missing patched template: .web-templates/$template; apply patches/0005-small-web-engine.patch or run scripts/recover.sh" >&2
+        exit 1
+    fi
+done
 
 for preset in web web-threads; do
     output="$root/build/$preset"
@@ -56,5 +59,11 @@ for preset in web web-threads; do
             exit 1
         fi
     done
+    wasm_size="$(stat -c %s "$output/index.wasm")"
+    if (( wasm_size >= 20000000 )); then
+        echo "wasm meeds to be below 20 MB: $output/index.wasm is $wasm_size bytes" >&2
+        exit 1
+    fi
+    cp -- "$project/.web-templates/GODOT-LICENSE.txt" "$project/.web-templates/GODOT-COPYRIGHT.txt" "$output/"
     echo "exported $output"
 done
